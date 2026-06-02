@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Course {
+  id          Int        @id @default(autoincrement())
+  name        String
+  idPrefix    Int        @unique
+  color       String     @default("#3B82F6")
+  description String?
+  customers   Customer[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@map("courses")
+}
+
+model Customer {
+  id             Int             @id @default(autoincrement())
+  customerCode   String          @unique
+  name           String
+  lineUserId     String?         @unique
+  courseId       Int
+  course         Course          @relation(fields: [courseId], references: [id])
+  reservations   Reservation[]
+  recurringSlots RecurringSlot[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@map("customers")
+}
+
+enum ReservationType {
+  FLEX
+  FIXED_INSTANCE
+}
+
+enum ReservationStatus {
+  CONFIRMED
+  CANCELLED
+}
+
+model Reservation {
+  id         Int               @id @default(autoincrement())
+  customerId Int
+  customer   Customer          @relation(fields: [customerId], references: [id])
+  date       DateTime          @db.Date
+  startTime  String
+  endTime    String
+  type       ReservationType   @default(FLEX)
+  status     ReservationStatus @default(CONFIRMED)
+  note       String?
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@map("reservations")
+}
+
+model RecurringSlot {
+  id         Int      @id @default(autoincrement())
+  customerId Int
+  customer   Customer @relation(fields: [customerId], references: [id])
+  dayOfWeek  Int
+  startTime  String
+  endTime    String
+  startDate  DateTime @db.Date
+  endDate    DateTime? @db.Date
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("recurring_slots")
+}
+
+model Admin {
+  id           Int    @id @default(autoincrement())
+  username     String @unique
+  passwordHash String
+
+  @@map("admins")
+}
