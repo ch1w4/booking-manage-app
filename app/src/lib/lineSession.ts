@@ -5,8 +5,6 @@ type SessionState =
   | { step: "reserve_select_start"; date: string }
   | { step: "reserve_select_end"; date: string; startTime: string }
   | { step: "reserve_confirm"; date: string; startTime: string; endTime: string }
-  | { step: "cancel_select"; reservationIds: number[] }
-  | { step: "change_select"; reservationIds: number[] }
   | { step: "change_select_date"; reservationId: number }
   | { step: "change_select_start"; reservationId: number; date: string }
   | { step: "change_select_end"; reservationId: number; date: string; startTime: string };

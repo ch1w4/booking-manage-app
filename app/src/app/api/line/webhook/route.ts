@@ -6,26 +6,34 @@ import { format, addDays, parseISO } from "date-fns";
 import { ja } from "date-fns/locale";
 import type { Message, FlexMessage, TextMessage } from "@line/bot-sdk";
 
-const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
-
-function timeText(t: string) {
-  return t;
-}
-
-function dateLabel(d: Date) {
+function dateLabelStr(d: Date) {
   return format(d, "M月d日（EEEEE）", { locale: ja });
 }
 
-function makeTimeOptions(from = "09:00", to = "20:30") {
-  const times: string[] = [];
-  let [h, m] = from.split(":").map(Number);
-  const [eh, em] = to.split(":").map(Number);
-  while (h < eh || (h === eh && m <= em)) {
-    times.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
-    m += 30;
-    if (m >= 60) { h++; m = 0; }
+// 開始時刻: 9〜20時の整時のみ（12個 = LINE上限13以内）
+function makeStartHours(): { label: string; text: string }[] {
+  const items = [];
+  for (let h = 9; h <= 20; h++) {
+    const t = `${String(h).padStart(2, "0")}:00`;
+    items.push({ label: t, text: t });
   }
-  return times;
+  return items;
+}
+
+// 終了時刻: 開始から+30分〜+4時間（30分刻み、最大8個）
+function makeEndTimes(startTime: string): { label: string; text: string }[] {
+  const [h, m] = startTime.split(":").map(Number);
+  const startMin = h * 60 + m;
+  const items = [];
+  for (let i = 1; i <= 8; i++) {
+    const endMin = startMin + i * 30;
+    if (endMin > 21 * 60) break;
+    const eh = Math.floor(endMin / 60);
+    const em = endMin % 60;
+    const t = `${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}`;
+    items.push({ label: t, text: t });
+  }
+  return items;
 }
 
 function quickReplyItems(items: { label: string; text: string }[]) {
@@ -53,28 +61,19 @@ function reservationCard(r: {
   type: string;
   customer: { name: string; customerCode: string };
 }): FlexMessage {
-  const dateStr = typeof r.date === "string"
-    ? r.date.slice(0, 10)
-    : format(r.date, "yyyy-MM-dd");
-  const dateLabel = format(parseISO(dateStr), "M月d日（EEEEE）", { locale: ja });
+  const dateStr =
+    typeof r.date === "string" ? r.date.slice(0, 10) : format(r.date, "yyyy-MM-dd");
+  const dl = format(parseISO(dateStr), "M月d日（EEEEE）", { locale: ja });
 
   return {
     type: "flex",
-    altText: `予約: ${dateLabel} ${r.startTime}〜${r.endTime}`,
+    altText: `予約: ${dl} ${r.startTime}〜${r.endTime}`,
     contents: {
       type: "bubble",
       header: {
         type: "box",
         layout: "vertical",
-        contents: [
-          {
-            type: "text",
-            text: "予約確認",
-            weight: "bold",
-            size: "sm",
-            color: "#ffffff",
-          },
-        ],
+        contents: [{ type: "text", text: "予約確認", weight: "bold", size: "sm", color: "#ffffff" }],
         backgroundColor: "#3B82F6",
         paddingAll: "12px",
       },
@@ -87,7 +86,7 @@ function reservationCard(r: {
             layout: "horizontal",
             contents: [
               { type: "text", text: "日付", size: "sm", color: "#6b7280", flex: 2 },
-              { type: "text", text: dateLabel, size: "sm", weight: "bold", flex: 5 },
+              { type: "text", text: dl, size: "sm", weight: "bold", flex: 5 },
             ],
             paddingBottom: "8px",
           },
@@ -128,22 +127,14 @@ function reservationCard(r: {
         contents: [
           {
             type: "button",
-            action: {
-              type: "message",
-              label: "変更",
-              text: `変更:${r.id}`,
-            },
+            action: { type: "message", label: "変更", text: `変更:${r.id}` },
             style: "secondary",
             flex: 1,
           },
           { type: "separator" },
           {
             type: "button",
-            action: {
-              type: "message",
-              label: "キャンセル",
-              text: `キャンセル:${r.id}`,
-            },
+            action: { type: "message", label: "キャンセル", text: `キャンセル:${r.id}` },
             style: "secondary",
             color: "#EF4444",
             flex: 1,
@@ -155,6 +146,12 @@ function reservationCard(r: {
     },
   };
 }
+
+const MENU_REPLIES = [
+  { label: "予約する", text: "予約する" },
+  { label: "予約確認・変更", text: "予約確認" },
+  { label: "キャンセル", text: "キャンセル" },
+];
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
@@ -168,14 +165,14 @@ export async function POST(req: NextRequest) {
   const events = payload.events ?? [];
 
   for (const event of events) {
+    // 友だち追加
     if (event.type === "follow") {
+      setSession(event.source.userId, { step: "register_waiting_code" });
       await getLineClient().replyMessage(event.replyToken, [
         textMsg(
-          "パソコン教室の公式LINEへようこそ！\n\nご利用には顧客IDの登録が必要です。\n4桁の顧客IDを入力してください。",
-          [{ label: "ID登録", text: "登録" }]
+          "パソコン教室の公式LINEへようこそ！\n\nご利用には顧客IDの登録が必要です。\n4桁の顧客IDを入力してください。"
         ),
       ]);
-      setSession(event.source.userId, { step: "register_waiting_code" });
       continue;
     }
 
@@ -185,108 +182,97 @@ export async function POST(req: NextRequest) {
     const text: string = event.message.text.trim();
     const session = getSession(userId);
 
-    const customer = await prisma.customer.findUnique({
-      where: { lineUserId: userId },
-    });
+    const customer = await prisma.customer.findUnique({ where: { lineUserId: userId } });
 
+    // ── 未登録ユーザー ──────────────────────────────────────
     if (!customer && session.step !== "register_waiting_code") {
+      setSession(userId, { step: "register_waiting_code" });
       await getLineClient().replyMessage(event.replyToken, [
         textMsg("まず顧客IDを登録してください。4桁のIDを入力してください。"),
       ]);
-      setSession(userId, { step: "register_waiting_code" });
       continue;
     }
 
-    if (text === "登録" || session.step === "register_waiting_code") {
-      if (text === "登録" && session.step !== "register_waiting_code") {
-        setSession(userId, { step: "register_waiting_code" });
-        await getLineClient().replyMessage(event.replyToken, [
-          textMsg("4桁の顧客IDを入力してください。"),
-        ]);
-        continue;
-      }
+    // ── ID登録フロー ────────────────────────────────────────
+    if (text === "登録" && session.step !== "register_waiting_code") {
+      setSession(userId, { step: "register_waiting_code" });
+      await getLineClient().replyMessage(event.replyToken, [
+        textMsg("4桁の顧客IDを入力してください。"),
+      ]);
+      continue;
+    }
 
+    if (session.step === "register_waiting_code") {
       if (/^\d{4}$/.test(text)) {
-        const found = await prisma.customer.findUnique({
-          where: { customerCode: text },
-        });
+        const found = await prisma.customer.findUnique({ where: { customerCode: text } });
         if (!found) {
           await getLineClient().replyMessage(event.replyToken, [
-            textMsg("そのIDは見つかりませんでした。もう一度入力してください。"),
+            textMsg("そのIDは見つかりませんでした。もう一度4桁のIDを入力してください。"),
           ]);
           continue;
         }
-        await prisma.customer.update({
-          where: { id: found.id },
-          data: { lineUserId: userId },
-        });
+        await prisma.customer.update({ where: { id: found.id }, data: { lineUserId: userId } });
         clearSession(userId);
         await getLineClient().replyMessage(event.replyToken, [
-          textMsg(
-            `${found.name} さん、登録完了しました！\n\n以下のメニューからご利用ください。`,
-            [
-              { label: "予約する", text: "予約する" },
-              { label: "予約確認・変更", text: "予約確認" },
-              { label: "キャンセル", text: "キャンセル" },
-            ]
-          ),
+          textMsg(`${found.name} さん、登録完了しました！\n何をしますか？`, MENU_REPLIES),
         ]);
         continue;
       }
-
       await getLineClient().replyMessage(event.replyToken, [
         textMsg("4桁の数字で入力してください。"),
       ]);
       continue;
     }
 
+    // ── 予約フロー ──────────────────────────────────────────
     if (text === "予約する" || text === "予約") {
       setSession(userId, { step: "reserve_select_date" });
       const today = new Date();
-      const quickReplies = [
+      const dateReplies = [
         { label: "今日", text: format(today, "yyyy-MM-dd") },
         { label: "明日", text: format(addDays(today, 1), "yyyy-MM-dd") },
         ...Array.from({ length: 5 }, (_, i) => {
           const d = addDays(today, i + 2);
-          return { label: dateLabel(d), text: format(d, "yyyy-MM-dd") };
+          return { label: dateLabelStr(d), text: format(d, "yyyy-MM-dd") };
         }),
       ];
       await getLineClient().replyMessage(event.replyToken, [
-        textMsg("ご希望の日付を選んでください。", quickReplies),
+        textMsg("ご希望の日付を選んでください。", dateReplies),
       ]);
       continue;
     }
 
+    // 日付選択
     if (session.step === "reserve_select_date" && /^\d{4}-\d{2}-\d{2}$/.test(text)) {
       setSession(userId, { step: "reserve_select_start", date: text });
-      const times = makeTimeOptions("09:00", "19:30");
       await getLineClient().replyMessage(event.replyToken, [
         textMsg(
           `${format(parseISO(text), "M月d日（EEEEE）", { locale: ja })}\n開始時間を選んでください。`,
-          times.map((t) => ({ label: t, text: t }))
+          makeStartHours()
         ),
       ]);
       continue;
     }
 
+    // 開始時刻選択
     if (session.step === "reserve_select_start" && /^\d{2}:\d{2}$/.test(text)) {
-      setSession(userId, {
-        step: "reserve_select_end",
-        date: session.date,
-        startTime: text,
-      });
-      const [h, m] = text.split(":").map(Number);
-      const startMin = h * 60 + m;
-      const times = makeTimeOptions(text, "21:00").filter((t) => {
-        const [th, tm] = t.split(":").map(Number);
-        return th * 60 + tm > startMin;
-      });
+      setSession(userId, { step: "reserve_select_end", date: session.date, startTime: text });
+      const endOptions = makeEndTimes(text);
+      if (endOptions.length === 0) {
+        // 20:00開始など終了時刻が取れない場合は戻す
+        setSession(userId, { step: "reserve_select_start", date: session.date });
+        await getLineClient().replyMessage(event.replyToken, [
+          textMsg("その時間は選べません。別の開始時間を選んでください。", makeStartHours()),
+        ]);
+        continue;
+      }
       await getLineClient().replyMessage(event.replyToken, [
-        textMsg(`終了時間を選んでください。`, times.map((t) => ({ label: t, text: t }))),
+        textMsg(`開始: ${text}\n終了時間を選んでください。`, endOptions),
       ]);
       continue;
     }
 
+    // 終了時刻選択
     if (session.step === "reserve_select_end" && /^\d{2}:\d{2}$/.test(text)) {
       setSession(userId, {
         step: "reserve_confirm",
@@ -294,10 +280,10 @@ export async function POST(req: NextRequest) {
         startTime: session.startTime,
         endTime: text,
       });
-      const dateStr = format(parseISO(session.date), "M月d日（EEEEE）", { locale: ja });
+      const dl = format(parseISO(session.date), "M月d日（EEEEE）", { locale: ja });
       await getLineClient().replyMessage(event.replyToken, [
         textMsg(
-          `以下の内容で予約しますか？\n\n日付: ${dateStr}\n時間: ${session.startTime} 〜 ${text}`,
+          `以下の内容で予約しますか？\n\n📅 ${dl}\n🕐 ${session.startTime} 〜 ${text}`,
           [
             { label: "確定する", text: "確定" },
             { label: "やり直す", text: "予約する" },
@@ -307,6 +293,7 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
+    // 予約確定
     if (session.step === "reserve_confirm" && text === "確定") {
       await prisma.reservation.create({
         data: {
@@ -318,39 +305,49 @@ export async function POST(req: NextRequest) {
         },
       });
       clearSession(userId);
-      const dateStr = format(parseISO(session.date), "M月d日（EEEEE）", { locale: ja });
+      const dl = format(parseISO(session.date), "M月d日（EEEEE）", { locale: ja });
       await getLineClient().replyMessage(event.replyToken, [
         textMsg(
-          `予約が完了しました！\n\n日付: ${dateStr}\n時間: ${session.startTime} 〜 ${session.endTime}`,
-          [
-            { label: "予約確認", text: "予約確認" },
-            { label: "メニューへ", text: "メニュー" },
-          ]
+          `✅ 予約が完了しました！\n\n📅 ${dl}\n🕐 ${session.startTime} 〜 ${session.endTime}`,
+          MENU_REPLIES
         ),
       ]);
       continue;
     }
 
+    // ── 予約確認・変更 ──────────────────────────────────────
     if (text === "予約確認" || text === "予約確認・変更") {
       const reservations = await prisma.reservation.findMany({
-        where: {
-          customerId: customer!.id,
-          status: "CONFIRMED",
-          date: { gte: new Date() },
-        },
+        where: { customerId: customer!.id, status: "CONFIRMED", date: { gte: new Date() } },
         orderBy: [{ date: "asc" }, { startTime: "asc" }],
         take: 5,
       });
-
       if (reservations.length === 0) {
         await getLineClient().replyMessage(event.replyToken, [
-          textMsg("現在予約はありません。", [
-            { label: "予約する", text: "予約する" },
-          ]),
+          textMsg("現在予約はありません。", [{ label: "予約する", text: "予約する" }]),
         ]);
         continue;
       }
+      const messages: Message[] = reservations.map((r) =>
+        reservationCard({ ...r, customer: customer! })
+      );
+      await getLineClient().replyMessage(event.replyToken, messages.slice(0, 5));
+      continue;
+    }
 
+    // ── キャンセルフロー ────────────────────────────────────
+    if (text === "キャンセル") {
+      const reservations = await prisma.reservation.findMany({
+        where: { customerId: customer!.id, status: "CONFIRMED", date: { gte: new Date() } },
+        orderBy: [{ date: "asc" }, { startTime: "asc" }],
+        take: 5,
+      });
+      if (reservations.length === 0) {
+        await getLineClient().replyMessage(event.replyToken, [
+          textMsg("現在予約はありません。", MENU_REPLIES),
+        ]);
+        continue;
+      }
       const messages: Message[] = reservations.map((r) =>
         reservationCard({ ...r, customer: customer! })
       );
@@ -362,15 +359,13 @@ export async function POST(req: NextRequest) {
       const id = Number(text.split(":")[1]);
       const reservation = await prisma.reservation.findUnique({ where: { id } });
       if (!reservation || reservation.customerId !== customer!.id) {
-        await getLineClient().replyMessage(event.replyToken, [
-          textMsg("予約が見つかりません。"),
-        ]);
+        await getLineClient().replyMessage(event.replyToken, [textMsg("予約が見つかりません。")]);
         continue;
       }
-      const dateStr = format(reservation.date, "M月d日（EEEEE）", { locale: ja });
+      const dl = format(reservation.date, "M月d日（EEEEE）", { locale: ja });
       await getLineClient().replyMessage(event.replyToken, [
         textMsg(
-          `${dateStr} ${reservation.startTime}〜${reservation.endTime} の予約をキャンセルしますか？`,
+          `${dl} ${reservation.startTime}〜${reservation.endTime} の予約をキャンセルしますか？`,
           [
             { label: "キャンセルする", text: `キャンセル確定:${id}` },
             { label: "戻る", text: "予約確認" },
@@ -382,30 +377,29 @@ export async function POST(req: NextRequest) {
 
     if (text.startsWith("キャンセル確定:")) {
       const id = Number(text.split(":")[1]);
-      await prisma.reservation.update({
-        where: { id },
-        data: { status: "CANCELLED" },
-      });
+      await prisma.reservation.update({ where: { id }, data: { status: "CANCELLED" } });
       clearSession(userId);
       await getLineClient().replyMessage(event.replyToken, [
-        textMsg("予約をキャンセルしました。", [
-          { label: "予約する", text: "予約する" },
-          { label: "メニューへ", text: "メニュー" },
-        ]),
+        textMsg("予約をキャンセルしました。", MENU_REPLIES),
       ]);
       continue;
     }
 
+    // ── 変更フロー ──────────────────────────────────────────
     if (text.startsWith("変更:")) {
       const id = Number(text.split(":")[1]);
       setSession(userId, { step: "change_select_date", reservationId: id });
       const today = new Date();
-      const quickReplies = Array.from({ length: 7 }, (_, i) => {
-        const d = addDays(today, i);
-        return { label: dateLabel(d), text: format(d, "yyyy-MM-dd") };
-      });
+      const dateReplies = [
+        { label: "今日", text: format(today, "yyyy-MM-dd") },
+        { label: "明日", text: format(addDays(today, 1), "yyyy-MM-dd") },
+        ...Array.from({ length: 5 }, (_, i) => {
+          const d = addDays(today, i + 2);
+          return { label: dateLabelStr(d), text: format(d, "yyyy-MM-dd") };
+        }),
+      ];
       await getLineClient().replyMessage(event.replyToken, [
-        textMsg("新しい日付を選んでください。", quickReplies),
+        textMsg("新しい日付を選んでください。", dateReplies),
       ]);
       continue;
     }
@@ -416,9 +410,11 @@ export async function POST(req: NextRequest) {
         reservationId: session.reservationId,
         date: text,
       });
-      const times = makeTimeOptions("09:00", "19:30");
       await getLineClient().replyMessage(event.replyToken, [
-        textMsg("新しい開始時間を選んでください。", times.map((t) => ({ label: t, text: t }))),
+        textMsg(
+          `${format(parseISO(text), "M月d日（EEEEE）", { locale: ja })}\n新しい開始時間を選んでください。`,
+          makeStartHours()
+        ),
       ]);
       continue;
     }
@@ -430,14 +426,8 @@ export async function POST(req: NextRequest) {
         date: session.date,
         startTime: text,
       });
-      const [h, m] = text.split(":").map(Number);
-      const startMin = h * 60 + m;
-      const times = makeTimeOptions(text, "21:00").filter((t) => {
-        const [th, tm] = t.split(":").map(Number);
-        return th * 60 + tm > startMin;
-      });
       await getLineClient().replyMessage(event.replyToken, [
-        textMsg("新しい終了時間を選んでください。", times.map((t) => ({ label: t, text: t }))),
+        textMsg(`開始: ${text}\n新しい終了時間を選んでください。`, makeEndTimes(text)),
       ]);
       continue;
     }
@@ -452,66 +442,28 @@ export async function POST(req: NextRequest) {
         },
       });
       clearSession(userId);
-      const dateStr = format(parseISO(session.date), "M月d日（EEEEE）", { locale: ja });
+      const dl = format(parseISO(session.date), "M月d日（EEEEE）", { locale: ja });
       await getLineClient().replyMessage(event.replyToken, [
         textMsg(
-          `予約を変更しました！\n\n日付: ${dateStr}\n時間: ${session.startTime} 〜 ${text}`,
-          [
-            { label: "予約確認", text: "予約確認" },
-            { label: "メニューへ", text: "メニュー" },
-          ]
+          `✅ 予約を変更しました！\n\n📅 ${dl}\n🕐 ${session.startTime} 〜 ${text}`,
+          MENU_REPLIES
         ),
       ]);
       continue;
     }
 
-    if (text === "キャンセル") {
-      const reservations = await prisma.reservation.findMany({
-        where: {
-          customerId: customer!.id,
-          status: "CONFIRMED",
-          date: { gte: new Date() },
-        },
-        orderBy: [{ date: "asc" }, { startTime: "asc" }],
-        take: 5,
-      });
-      if (reservations.length === 0) {
-        await getLineClient().replyMessage(event.replyToken, [
-          textMsg("現在予約はありません。"),
-        ]);
-        continue;
-      }
-      const messages: Message[] = reservations.map((r) =>
-        reservationCard({ ...r, customer: customer! })
-      );
-      await getLineClient().replyMessage(event.replyToken, messages.slice(0, 5));
-      continue;
-    }
-
+    // ── メニュー ────────────────────────────────────────────
     if (text === "メニュー" || text === "ホーム") {
       clearSession(userId);
       await getLineClient().replyMessage(event.replyToken, [
-        textMsg(
-          `${customer!.name} さん、何をしますか？`,
-          [
-            { label: "予約する", text: "予約する" },
-            { label: "予約確認・変更", text: "予約確認" },
-            { label: "キャンセル", text: "キャンセル" },
-          ]
-        ),
+        textMsg(`${customer!.name} さん、何をしますか？`, MENU_REPLIES),
       ]);
       continue;
     }
 
+    // その他
     await getLineClient().replyMessage(event.replyToken, [
-      textMsg(
-        "ご用件をお選びください。",
-        [
-          { label: "予約する", text: "予約する" },
-          { label: "予約確認・変更", text: "予約確認" },
-          { label: "キャンセル", text: "キャンセル" },
-        ]
-      ),
+      textMsg("ご用件をお選びください。", MENU_REPLIES),
     ]);
   }
 
