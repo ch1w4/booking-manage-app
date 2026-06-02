@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { ja } from "date-fns/locale";
 import { X, Plus, Printer } from "lucide-react";
@@ -323,7 +323,10 @@ function ScheduleTable({
       <table className="border-collapse text-xs w-full">
         <thead>
           <tr className="bg-gray-100">
-            <th className="border border-gray-300 px-2 py-1.5 text-center w-20 font-medium text-gray-600">
+            <th
+              rowSpan={2}
+              className="border border-gray-300 px-2 py-1.5 text-center w-20 font-medium text-gray-600 align-middle"
+            >
               時間
             </th>
             {seats.map((s) => (
@@ -337,19 +340,12 @@ function ScheduleTable({
             ))}
           </tr>
           <tr className="bg-gray-50 text-gray-500">
-            <th className="border border-gray-300 px-1 py-1" />
             {seats.map((s) => (
-              <>
-                <th key={`${s}-mark`} className="border border-gray-300 px-1 py-1 w-8 font-normal">
-                  印
-                </th>
-                <th key={`${s}-id`} className="border border-gray-300 px-1 py-1 w-16 font-normal">
-                  ID
-                </th>
-                <th key={`${s}-name`} className="border border-gray-300 px-2 py-1 font-normal">
-                  氏名
-                </th>
-              </>
+              <React.Fragment key={s}>
+                <th className="border border-gray-300 px-1 py-1 w-8 font-normal">印</th>
+                <th className="border border-gray-300 px-1 py-1 w-16 font-normal">ID</th>
+                <th className="border border-gray-300 px-2 py-1 font-normal">氏名</th>
+              </React.Fragment>
             ))}
           </tr>
         </thead>
@@ -363,11 +359,11 @@ function ScheduleTable({
                 const hit = getReservationAt(s, timeRow);
                 if (!hit) {
                   return (
-                    <>
-                      <td key={`${s}-mark`} className="border border-gray-300 px-1 py-1 w-8 bg-white" />
-                      <td key={`${s}-id`} className="border border-gray-300 px-1 py-1 w-16 bg-white" />
-                      <td key={`${s}-name`} className="border border-gray-300 px-2 py-1 bg-white" />
-                    </>
+                    <React.Fragment key={`${s}-${timeRow}`}>
+                      <td className="border border-gray-300 px-1 py-1 w-8 bg-white" />
+                      <td className="border border-gray-300 px-1 py-1 w-16 bg-white" />
+                      <td className="border border-gray-300 px-2 py-1 bg-white" />
+                    </React.Fragment>
                   );
                 }
                 const { r, isFirst } = hit;
@@ -375,33 +371,20 @@ function ScheduleTable({
                 const bg = isFixed ? r.customer.course.color + "18" : "white";
                 if (!isFirst) {
                   return (
-                    <>
-                      <td key={`${s}-mark`} className="border border-gray-300 px-1 py-1" style={{ backgroundColor: bg }} />
-                      <td key={`${s}-id`} className="border border-gray-300 px-1 py-1 text-center text-gray-400" style={{ backgroundColor: bg }}>
-                        ↓
-                      </td>
-                      <td key={`${s}-name`} className="border border-gray-300 px-2 py-1 text-gray-400" style={{ backgroundColor: bg }}>
-                        ↓
-                      </td>
-                    </>
+                    <React.Fragment key={`${s}-${timeRow}`}>
+                      <td className="border border-gray-300 px-1 py-1" style={{ backgroundColor: bg }} />
+                      <td className="border border-gray-300 px-1 py-1 text-center text-gray-400" style={{ backgroundColor: bg }}>↓</td>
+                      <td className="border border-gray-300 px-2 py-1 text-gray-400" style={{ backgroundColor: bg }}>↓</td>
+                    </React.Fragment>
                   );
                 }
                 return (
-                  <>
-                    <td
-                      key={`${s}-mark`}
-                      className="border border-gray-300 px-1 py-1"
-                      style={{ backgroundColor: bg }}
-                    />
-                    <td
-                      key={`${s}-id`}
-                      className="border border-gray-300 px-1 py-1 font-mono font-medium"
-                      style={{ backgroundColor: bg }}
-                    >
+                  <React.Fragment key={`${s}-${timeRow}`}>
+                    <td className="border border-gray-300 px-1 py-1" style={{ backgroundColor: bg }} />
+                    <td className="border border-gray-300 px-1 py-1 font-mono font-medium" style={{ backgroundColor: bg }}>
                       {r.customer.customerCode}
                     </td>
                     <td
-                      key={`${s}-name`}
                       className="border border-gray-300 px-2 py-1 font-medium group relative"
                       style={{ backgroundColor: bg, color: r.customer.course.color }}
                     >
@@ -421,7 +404,7 @@ function ScheduleTable({
                         <div className="text-xs text-gray-400 truncate">{r.note}</div>
                       )}
                     </td>
-                  </>
+                  </React.Fragment>
                 );
               })}
             </tr>
