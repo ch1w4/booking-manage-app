@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { ja } from "date-fns/locale";
-import { X, Plus, Printer } from "lucide-react";
+import { X, Plus, Printer, Search } from "lucide-react";
 
 type Course = { id: number; name: string; color: string };
 type Customer = { id: number; customerCode: string; name: string; course: Course };
@@ -19,8 +19,8 @@ type Reservation = {
   customer: Customer;
 };
 
-const SEATS_TOP = [0, 1, 2, 3, 4, 5];   // 1〜6番
-const SEATS_BOT = [6, 7, 8, 9, 10];     // 7〜11番
+const SEATS_TOP = [0, 1, 2, 3, 4, 5];
+const SEATS_BOT = [6, 7, 8, 9, 10];
 
 const TIME_OPTIONS = Array.from({ length: 25 }, (_, i) => {
   const h = Math.floor(i / 2) + 8;
@@ -54,13 +54,99 @@ function assignSeats(reservations: Reservation[]): Map<number, number> {
   return result;
 }
 
-// モーダルヘッダー固定高さ
-const MODAL_HEADER_H = 44;
-// 各セクションのテーブルヘッダー高さ（2行）
-const SECTION_HEADER_H = 36;
-// 段区切り太線
-const DIVIDER_H = 3;
+// ─── 顧客検索コンポーネント ───────────────────────────────────────
+function CustomerSearch({
+  customers,
+  value,
+  onChange,
+}: {
+  customers: Customer[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [selectedLabel, setSelectedLabel] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
 
+  const filtered = query.length === 0
+    ? customers.slice(0, 20)
+    : customers.filter(
+        (c) =>
+          c.name.includes(query) ||
+          c.customerCode.includes(query) ||
+          c.course.name.includes(query)
+      ).slice(0, 20);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  function select(c: Customer) {
+    onChange(String(c.id));
+    setSelectedLabel(`${c.customerCode} ${c.name}`);
+    setQuery("");
+    setOpen(false);
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-blue-500">
+        <Search size={14} className="ml-2 text-gray-400 flex-shrink-0" />
+        <input
+          type="text"
+          value={open ? query : selectedLabel}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => { setOpen(true); setQuery(""); }}
+          placeholder="名前・IDで検索..."
+          className="flex-1 px-2 py-1.5 text-sm outline-none bg-white"
+        />
+        {value && (
+          <button
+            onClick={() => { onChange(""); setSelectedLabel(""); setQuery(""); }}
+            className="px-2 text-gray-400 hover:text-gray-600"
+          >
+            <X size={12} />
+          </button>
+        )}
+      </div>
+
+      {open && (
+        <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-52 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <p className="px-3 py-2 text-sm text-gray-400">見つかりません</p>
+          ) : (
+            filtered.map((c) => (
+              <button
+                key={c.id}
+                onMouseDown={() => select(c)}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center gap-2"
+              >
+                <span
+                  className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: c.course.color }}
+                />
+                <span className="font-mono text-gray-500 text-xs w-10 flex-shrink-0">
+                  {c.customerCode}
+                </span>
+                <span className="font-medium text-gray-800">{c.name}</span>
+                <span className="text-xs text-gray-400 ml-auto truncate">{c.course.name}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── メインコンポーネント ─────────────────────────────────────────
 export default function DayDetailModal({
   date,
   customers,
@@ -73,7 +159,6 @@ export default function DayDetailModal({
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [rowH, setRowH] = useState(18);
   const [form, setForm] = useState({
     customerId: "",
     startTime: "10:00",
@@ -84,19 +169,6 @@ export default function DayDetailModal({
   const [saving, setSaving] = useState(false);
 
   const dateLabel = format(parseISO(date), "yyyy年M月d日（EEEEE）", { locale: ja });
-
-  // 行高を画面に合わせて計算
-  useEffect(() => {
-    const calc = () => {
-      const vh = window.innerHeight;
-      const available =
-        vh - MODAL_HEADER_H - DIVIDER_H - SECTION_HEADER_H * 2;
-      setRowH(Math.floor(available / (TIME_ROWS.length * 2)));
-    };
-    calc();
-    window.addEventListener("resize", calc);
-    return () => window.removeEventListener("resize", calc);
-  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -112,12 +184,10 @@ export default function DayDetailModal({
     for (const r of reservations) {
       if (seatMap.get(r.id) !== seat) continue;
       const rowMin = toMin(timeRow);
-      const rowEnd = rowMin + 60; // 1時間ブロック
+      const rowEnd = rowMin + 60;
       const s = toMin(r.startTime);
       const e = toMin(r.endTime);
-      // この1時間ブロックに予約が重なる場合
       if (s < rowEnd && e > rowMin) {
-        // 前の行でも表示されていなければ isFirst = true
         const prevRowMin = rowMin - 60;
         const isFirst = prevRowMin < toMin(TIME_ROWS[0]) || !(s < rowMin && e > prevRowMin);
         return { r, isFirst };
@@ -147,6 +217,7 @@ export default function DayDetailModal({
         [...prev, created].sort((a, b) => a.startTime.localeCompare(b.startTime))
       );
       setShowAdd(false);
+      setForm({ customerId: "", startTime: "10:00", endTime: "12:00", type: "FLEX", note: "" });
     }
     setSaving(false);
   }
@@ -163,23 +234,28 @@ export default function DayDetailModal({
       {/* オーバーレイ */}
       <div className="fixed inset-0 bg-black/50 z-40 no-print" onClick={onClose} />
 
-      {/* モーダル：フルスクリーン・スクロールなし */}
+      {/* モーダル：スクロールあり */}
       <div
-        className="fixed inset-0 z-50 bg-white no-print flex flex-col"
-        style={{ overflow: "hidden" }}
+        className="fixed z-50 bg-white shadow-2xl no-print flex flex-col rounded-xl"
+        style={{
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: "95vw",
+          maxWidth: 1500,
+          maxHeight: "90vh",
+          overflow: "hidden",
+        }}
       >
         {/* ヘッダー */}
-        <div
-          className="flex items-center justify-between px-4 border-b border-gray-200 bg-white flex-shrink-0"
-          style={{ height: MODAL_HEADER_H }}
-        >
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 flex-shrink-0">
           <div className="flex items-center gap-3">
             <span className="font-bold text-gray-800">{dateLabel}</span>
             <span className="text-xs text-gray-400">{reservations.length}件</span>
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setShowAdd(true)}
+              onClick={() => setShowAdd(!showAdd)}
               className="flex items-center gap-1 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-blue-700"
             >
               <Plus size={14} /> 予約追加
@@ -196,95 +272,100 @@ export default function DayDetailModal({
           </div>
         </div>
 
-        {/* テーブルエリア：スクロールなし */}
-        {loading ? (
-          <div className="flex-1 flex items-center justify-center text-gray-400">読み込み中...</div>
-        ) : (
-          <div
-            className="flex-1 overflow-hidden px-3 py-2"
-            style={{ minHeight: 0 }}
-          >
-            <BoothTable
-              dateLabel={dateLabel}
-              reservations={reservations}
-              seatMap={seatMap}
-              timeRows={TIME_ROWS}
-              rowH={rowH}
-              sectionHeaderH={SECTION_HEADER_H}
-              getAt={getAt}
-              onCancel={handleCancel}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* 予約追加モーダル */}
-      {showAdd && (
-        <>
-          <div className="fixed inset-0 z-[60] no-print" onClick={() => setShowAdd(false)} />
-          <div
-            className="fixed z-[70] bg-white rounded-xl shadow-2xl p-5 no-print"
-            style={{ top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: 400 }}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-sm text-gray-800">予約追加 — {dateLabel}</h3>
-              <button onClick={() => setShowAdd(false)} className="p-1 hover:bg-gray-100 rounded">
-                <X size={16} />
-              </button>
-            </div>
-            <div className="space-y-3">
-              <div>
+        {/* 予約追加フォーム（インライン） */}
+        {showAdd && (
+          <div className="border-b border-gray-200 px-4 py-3 bg-blue-50 flex-shrink-0">
+            <div className="flex flex-wrap items-end gap-3">
+              <div style={{ minWidth: 220 }}>
                 <label className="block text-xs font-medium text-gray-600 mb-1">顧客</label>
-                <select value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm">
-                  <option value="">選択してください</option>
-                  {customers.map((c) => <option key={c.id} value={c.id}>{c.customerCode} - {c.name}</option>)}
+                <CustomerSearch
+                  customers={customers}
+                  value={form.customerId}
+                  onChange={(id) => setForm({ ...form, customerId: id })}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">開始</label>
+                <select
+                  value={form.startTime}
+                  onChange={(e) => setForm({ ...form, startTime: e.target.value })}
+                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
+                >
+                  {TIME_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">開始</label>
-                  <select value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm">
-                    {TIME_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">終了</label>
-                  <select value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm">
-                    {TIME_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">終了</label>
+                <select
+                  value={form.endTime}
+                  onChange={(e) => setForm({ ...form, endTime: e.target.value })}
+                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
+                >
+                  {TIME_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">種別</label>
-                <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as "FLEX" | "FIXED_INSTANCE" })} className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm">
+                <select
+                  value={form.type}
+                  onChange={(e) => setForm({ ...form, type: e.target.value as "FLEX" | "FIXED_INSTANCE" })}
+                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
+                >
                   <option value="FLEX">フレックス</option>
                   <option value="FIXED_INSTANCE">固定</option>
                 </select>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">メモ</label>
-                <input type="text" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm" placeholder="任意" />
+                <input
+                  type="text"
+                  value={form.note}
+                  onChange={(e) => setForm({ ...form, note: e.target.value })}
+                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm w-32"
+                  placeholder="任意"
+                />
               </div>
-            </div>
-            <div className="flex gap-2 mt-4 justify-end">
-              <button onClick={() => setShowAdd(false)} className="px-3 py-1.5 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50">キャンセル</button>
-              <button onClick={handleAdd} disabled={saving || !form.customerId} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              <button
+                onClick={handleAdd}
+                disabled={saving || !form.customerId}
+                className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50"
+              >
                 {saving ? "追加中…" : "追加"}
+              </button>
+              <button
+                onClick={() => setShowAdd(false)}
+                className="text-sm text-gray-500 hover:text-gray-700"
+              >
+                閉じる
               </button>
             </div>
           </div>
-        </>
-      )}
+        )}
 
-      {/* 印刷専用（ブース表のみ） */}
+        {/* スクロール可能なテーブル */}
+        <div className="overflow-auto flex-1 p-3">
+          {loading ? (
+            <div className="flex items-center justify-center py-20 text-gray-400">読み込み中...</div>
+          ) : (
+            <BoothTable
+              dateLabel={dateLabel}
+              reservations={reservations}
+              seatMap={seatMap}
+              timeRows={TIME_ROWS}
+              getAt={getAt}
+              onCancel={handleCancel}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* 印刷専用 */}
       <div className="print-only" style={{ display: "none" }}>
         <BoothTable
           dateLabel={dateLabel}
           reservations={reservations}
           seatMap={seatMap}
           timeRows={TIME_ROWS}
-          rowH={0}
-          sectionHeaderH={0}
           getAt={getAt}
           onCancel={() => {}}
           isPrint
@@ -300,8 +381,6 @@ function BoothTable({
   reservations,
   seatMap,
   timeRows,
-  rowH,
-  sectionHeaderH,
   getAt,
   onCancel,
   isPrint = false,
@@ -310,39 +389,18 @@ function BoothTable({
   reservations: Reservation[];
   seatMap: Map<number, number>;
   timeRows: string[];
-  rowH: number;
-  sectionHeaderH: number;
   getAt: (seat: number, time: string) => { r: Reservation; isFirst: boolean } | null;
   onCancel: (id: number) => void;
   isPrint?: boolean;
 }) {
-  // 印刷時：各行を mm で指定（A4横 8mmマージン ≈ 281×194mm 利用可能）
-  // タイトル 6mm → セクション1 (94mm - セクションヘッダー 8mm = 86mm / 25行 ≈ 3.44mm/行)
-  // セクション2も同様
-  // 13行×2段: (194mm - 16mm余白 - 6mm タイトル - 8mm ヘッダー×2) / 26行 ≈ 6.3mm
   const printRowMm = 6.0;
   const printSecHeaderMm = 8;
   const printTitleMm = 6;
-
   const outerBorder = "3px solid #1f2937";
   const sectionDivider = "3px solid #1f2937";
 
   return (
-    <div
-      style={
-        isPrint
-          ? {
-              width: "281mm",
-              fontFamily: "system-ui, sans-serif",
-            }
-          : {
-              height: "100%",
-              display: "flex",
-              flexDirection: "column",
-            }
-      }
-    >
-      {/* タイトル */}
+    <div style={isPrint ? { width: "281mm", fontFamily: "system-ui, sans-serif" } : {}}>
       <div
         style={
           isPrint
@@ -355,108 +413,50 @@ function BoothTable({
         <span style={{ color: "#9ca3af" }}>{reservations.length}件</span>
       </div>
 
-      {/* 外枠（太線）で2段を囲む */}
-      <div
-        style={
-          isPrint
-            ? { border: outerBorder, flex: 1 }
-            : { border: outerBorder, display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }
-        }
-      >
-        {/* 上段: 1〜6番 */}
-        <SectionTable
-          seats={SEATS_TOP}
-          timeRows={timeRows}
-          rowH={rowH}
-          sectionHeaderH={sectionHeaderH}
-          getAt={getAt}
-          onCancel={onCancel}
-          isPrint={isPrint}
-          printRowMm={printRowMm}
-          printSecHeaderMm={printSecHeaderMm}
-        />
-
-        {/* 段区切り太線 */}
-        <div style={{ borderTop: sectionDivider, flexShrink: 0 }} />
-
-        {/* 下段: 7〜11番 */}
-        <SectionTable
-          seats={SEATS_BOT}
-          timeRows={timeRows}
-          rowH={rowH}
-          sectionHeaderH={sectionHeaderH}
-          getAt={getAt}
-          onCancel={onCancel}
-          isPrint={isPrint}
-          printRowMm={printRowMm}
-          printSecHeaderMm={printSecHeaderMm}
-        />
+      <div style={{ border: outerBorder, display: "inline-block", minWidth: "100%" }}>
+        <SectionTable seats={SEATS_TOP} timeRows={timeRows} getAt={getAt} onCancel={onCancel} isPrint={isPrint} printRowMm={printRowMm} printSecHeaderMm={printSecHeaderMm} />
+        <div style={{ borderTop: sectionDivider }} />
+        <SectionTable seats={SEATS_BOT} timeRows={timeRows} getAt={getAt} onCancel={onCancel} isPrint={isPrint} printRowMm={printRowMm} printSecHeaderMm={printSecHeaderMm} />
       </div>
     </div>
   );
 }
 
-// ─── 1段分のテーブル ──────────────────────────────────────────────
+// ─── 1段分テーブル ────────────────────────────────────────────────
 function SectionTable({
-  seats,
-  timeRows,
-  rowH,
-  sectionHeaderH,
-  getAt,
-  onCancel,
-  isPrint,
-  printRowMm,
-  printSecHeaderMm,
+  seats, timeRows, getAt, onCancel, isPrint, printRowMm, printSecHeaderMm,
 }: {
   seats: number[];
   timeRows: string[];
-  rowH: number;
-  sectionHeaderH: number;
   getAt: (seat: number, time: string) => { r: Reservation; isFirst: boolean } | null;
   onCancel: (id: number) => void;
   isPrint: boolean;
   printRowMm: number;
   printSecHeaderMm: number;
 }) {
-  const headerRowH = isPrint ? `${printSecHeaderMm / 2}mm` : `${Math.floor(sectionHeaderH / 2)}px`;
-  const dataRowH = isPrint ? `${printRowMm}mm` : `${rowH}px`;
-  const fontSize = isPrint ? 8 : Math.max(9, Math.min(11, rowH - 4));
+  const headerRowH = isPrint ? `${printSecHeaderMm / 2}mm` : "18px";
+  const dataRowH = isPrint ? `${printRowMm}mm` : "24px";
+  const fontSize = isPrint ? 8 : 11;
 
   return (
-    <table
-      style={{
-        borderCollapse: "collapse",
-        width: "100%",
-        tableLayout: "fixed",
-        fontSize,
-        ...(isPrint ? {} : { flex: 1 }),
-      }}
-    >
+    <table style={{ borderCollapse: "collapse", width: "100%", tableLayout: "fixed", fontSize }}>
       <colgroup>
-        <col style={{ width: isPrint ? "9mm" : 50 }} />
+        <col style={{ width: isPrint ? "9mm" : 52 }} />
         {seats.map((s) => (
           <React.Fragment key={s}>
             <col style={{ width: isPrint ? "4mm" : 22 }} />
-            <col style={{ width: isPrint ? "6mm" : 30 }} />
+            <col style={{ width: isPrint ? "6mm" : 32 }} />
             <col />
           </React.Fragment>
         ))}
       </colgroup>
-
       <thead>
         <tr style={{ height: headerRowH, backgroundColor: "#f3f4f6" }}>
-          <th
-            rowSpan={2}
-            style={{ border: "1px solid #d1d5db", textAlign: "center", fontWeight: 600, color: "#4b5563", verticalAlign: "middle" }}
-          >
+          <th rowSpan={2} style={{ border: "1px solid #d1d5db", textAlign: "center", fontWeight: 600, color: "#4b5563", verticalAlign: "middle" }}>
             時間
           </th>
           {seats.map((s) => (
-            <th
-              key={s}
-              colSpan={3}
-              style={{ border: "1px solid #d1d5db", textAlign: "center", fontWeight: 700, color: "#1f2937" }}
-            >
+            <th key={s} colSpan={3} style={{ border: "1px solid #d1d5db", textAlign: "center", fontWeight: 700, color: "#1f2937" }}>
               {s + 1}番
             </th>
           ))}
@@ -471,7 +471,6 @@ function SectionTable({
           ))}
         </tr>
       </thead>
-
       <tbody>
         {timeRows.map((timeRow) => (
           <tr key={timeRow} style={{ height: dataRowH }}>
@@ -483,9 +482,9 @@ function SectionTable({
               if (!hit) {
                 return (
                   <React.Fragment key={`${s}-${timeRow}`}>
-                    <td style={{ border: "1px solid #f3f4f6", backgroundColor: "white" }} />
-                    <td style={{ border: "1px solid #f3f4f6", backgroundColor: "white" }} />
-                    <td style={{ border: "1px solid #f3f4f6", backgroundColor: "white" }} />
+                    <td style={{ border: "1px solid #f3f4f6" }} />
+                    <td style={{ border: "1px solid #f3f4f6" }} />
+                    <td style={{ border: "1px solid #f3f4f6" }} />
                   </React.Fragment>
                 );
               }
@@ -506,20 +505,11 @@ function SectionTable({
                   <td style={{ border: "1px solid #f3f4f6", backgroundColor: bg, textAlign: "center", fontFamily: "monospace", fontWeight: 600 }}>
                     {r.customer.customerCode}
                   </td>
-                  <td
-                    style={{ border: "1px solid #f3f4f6", backgroundColor: bg, color: r.customer.course.color, fontWeight: 600, overflow: "hidden", paddingLeft: 2 }}
-                    className="group relative"
-                  >
+                  <td style={{ border: "1px solid #f3f4f6", backgroundColor: bg, color: r.customer.course.color, fontWeight: 600, overflow: "hidden", paddingLeft: 2 }} className="group relative">
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.customer.name}</span>
                       {!isPrint && r.id > 0 && (
-                        <button
-                          onClick={() => onCancel(r.id)}
-                          className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 flex-shrink-0"
-                          style={{ fontSize: 10, marginLeft: 2 }}
-                        >
-                          ×
-                        </button>
+                        <button onClick={() => onCancel(r.id)} className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 flex-shrink-0" style={{ fontSize: 10, marginLeft: 2 }}>×</button>
                       )}
                     </div>
                   </td>
