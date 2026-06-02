@@ -39,14 +39,21 @@
     size: A4 landscape;
     margin: 8mm;
   }
-  .no-print {
-    display: none !important;
+
+  /* ブース表以外はすべて非表示 */
+  body * {
+    visibility: hidden !important;
+  }
+  .print-only,
+  .print-only * {
+    visibility: visible !important;
   }
   .print-only {
     display: block !important;
-  }
-  body {
-    background: white;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 281mm !important;
   }
 }
 
