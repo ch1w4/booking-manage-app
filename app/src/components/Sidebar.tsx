@@ -7,7 +7,6 @@ import {
   CalendarDays,
   Users,
   BookOpen,
-  Printer,
   LogOut,
 } from "lucide-react";
 
@@ -16,7 +15,6 @@ const nav = [
   { href: "/reservations", label: "予約管理", icon: CalendarDays },
   { href: "/customers", label: "顧客管理", icon: Users },
   { href: "/courses", label: "講座設定", icon: BookOpen },
-  { href: "/print", label: "印刷", icon: Printer },
 ];
 
 export default function Sidebar() {

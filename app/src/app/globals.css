@@ -38,4 +38,16 @@
   .no-print {
     display: none !important;
   }
+  .print-only {
+    display: block !important;
+  }
+  body {
+    background: white;
+  }
+}
+
+@media screen {
+  .print-only {
+    display: none;
+  }
 }
