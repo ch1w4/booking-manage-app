@@ -10,7 +10,6 @@ FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npx prisma generate
-RUN npx tsc --outDir dist --module commonjs --target es2020 --esModuleInterop true --skipLibCheck true prisma/seed.ts 2>/dev/null || true
 RUN npm run build
 
 FROM base AS runner
@@ -24,9 +23,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/node_modules/bcryptjs ./node_modules/bcryptjs
-COPY --from=builder /app/node_modules/@types/bcryptjs ./node_modules/@types/bcryptjs
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/dist/prisma/seed.js ./seed.js
+COPY --from=builder /app/prisma/seed.js ./seed.js
 
 USER nextjs
 EXPOSE 3000
