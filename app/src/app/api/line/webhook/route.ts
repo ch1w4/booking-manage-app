@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { validateLineSignature, lineClient } from "@/lib/line";
+import { validateLineSignature, getLineClient } from "@/lib/line";
 import { prisma } from "@/lib/db";
 import { getSession, setSession, clearSession } from "@/lib/lineSession";
 import { format, addDays, parseISO } from "date-fns";
@@ -169,7 +169,7 @@ export async function POST(req: NextRequest) {
 
   for (const event of events) {
     if (event.type === "follow") {
-      await lineClient.replyMessage(event.replyToken, [
+      await getLineClient().replyMessage(event.replyToken, [
         textMsg(
           "パソコン教室の公式LINEへようこそ！\n\nご利用には顧客IDの登録が必要です。\n4桁の顧客IDを入力してください。",
           [{ label: "ID登録", text: "登録" }]
@@ -190,7 +190,7 @@ export async function POST(req: NextRequest) {
     });
 
     if (!customer && session.step !== "register_waiting_code") {
-      await lineClient.replyMessage(event.replyToken, [
+      await getLineClient().replyMessage(event.replyToken, [
         textMsg("まず顧客IDを登録してください。4桁のIDを入力してください。"),
       ]);
       setSession(userId, { step: "register_waiting_code" });
@@ -200,7 +200,7 @@ export async function POST(req: NextRequest) {
     if (text === "登録" || session.step === "register_waiting_code") {
       if (text === "登録" && session.step !== "register_waiting_code") {
         setSession(userId, { step: "register_waiting_code" });
-        await lineClient.replyMessage(event.replyToken, [
+        await getLineClient().replyMessage(event.replyToken, [
           textMsg("4桁の顧客IDを入力してください。"),
         ]);
         continue;
@@ -211,7 +211,7 @@ export async function POST(req: NextRequest) {
           where: { customerCode: text },
         });
         if (!found) {
-          await lineClient.replyMessage(event.replyToken, [
+          await getLineClient().replyMessage(event.replyToken, [
             textMsg("そのIDは見つかりませんでした。もう一度入力してください。"),
           ]);
           continue;
@@ -221,7 +221,7 @@ export async function POST(req: NextRequest) {
           data: { lineUserId: userId },
         });
         clearSession(userId);
-        await lineClient.replyMessage(event.replyToken, [
+        await getLineClient().replyMessage(event.replyToken, [
           textMsg(
             `${found.name} さん、登録完了しました！\n\n以下のメニューからご利用ください。`,
             [
@@ -234,7 +234,7 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      await lineClient.replyMessage(event.replyToken, [
+      await getLineClient().replyMessage(event.replyToken, [
         textMsg("4桁の数字で入力してください。"),
       ]);
       continue;
@@ -251,7 +251,7 @@ export async function POST(req: NextRequest) {
           return { label: dateLabel(d), text: format(d, "yyyy-MM-dd") };
         }),
       ];
-      await lineClient.replyMessage(event.replyToken, [
+      await getLineClient().replyMessage(event.replyToken, [
         textMsg("ご希望の日付を選んでください。", quickReplies),
       ]);
       continue;
@@ -260,7 +260,7 @@ export async function POST(req: NextRequest) {
     if (session.step === "reserve_select_date" && /^\d{4}-\d{2}-\d{2}$/.test(text)) {
       setSession(userId, { step: "reserve_select_start", date: text });
       const times = makeTimeOptions("09:00", "19:30");
-      await lineClient.replyMessage(event.replyToken, [
+      await getLineClient().replyMessage(event.replyToken, [
         textMsg(
           `${format(parseISO(text), "M月d日（EEEEE）", { locale: ja })}\n開始時間を選んでください。`,
           times.map((t) => ({ label: t, text: t }))
@@ -281,7 +281,7 @@ export async function POST(req: NextRequest) {
         const [th, tm] = t.split(":").map(Number);
         return th * 60 + tm > startMin;
       });
-      await lineClient.replyMessage(event.replyToken, [
+      await getLineClient().replyMessage(event.replyToken, [
         textMsg(`終了時間を選んでください。`, times.map((t) => ({ label: t, text: t }))),
       ]);
       continue;
@@ -295,7 +295,7 @@ export async function POST(req: NextRequest) {
         endTime: text,
       });
       const dateStr = format(parseISO(session.date), "M月d日（EEEEE）", { locale: ja });
-      await lineClient.replyMessage(event.replyToken, [
+      await getLineClient().replyMessage(event.replyToken, [
         textMsg(
           `以下の内容で予約しますか？\n\n日付: ${dateStr}\n時間: ${session.startTime} 〜 ${text}`,
           [
@@ -319,7 +319,7 @@ export async function POST(req: NextRequest) {
       });
       clearSession(userId);
       const dateStr = format(parseISO(session.date), "M月d日（EEEEE）", { locale: ja });
-      await lineClient.replyMessage(event.replyToken, [
+      await getLineClient().replyMessage(event.replyToken, [
         textMsg(
           `予約が完了しました！\n\n日付: ${dateStr}\n時間: ${session.startTime} 〜 ${session.endTime}`,
           [
@@ -343,7 +343,7 @@ export async function POST(req: NextRequest) {
       });
 
       if (reservations.length === 0) {
-        await lineClient.replyMessage(event.replyToken, [
+        await getLineClient().replyMessage(event.replyToken, [
           textMsg("現在予約はありません。", [
             { label: "予約する", text: "予約する" },
           ]),
@@ -354,7 +354,7 @@ export async function POST(req: NextRequest) {
       const messages: Message[] = reservations.map((r) =>
         reservationCard({ ...r, customer: customer! })
       );
-      await lineClient.replyMessage(event.replyToken, messages.slice(0, 5));
+      await getLineClient().replyMessage(event.replyToken, messages.slice(0, 5));
       continue;
     }
 
@@ -362,13 +362,13 @@ export async function POST(req: NextRequest) {
       const id = Number(text.split(":")[1]);
       const reservation = await prisma.reservation.findUnique({ where: { id } });
       if (!reservation || reservation.customerId !== customer!.id) {
-        await lineClient.replyMessage(event.replyToken, [
+        await getLineClient().replyMessage(event.replyToken, [
           textMsg("予約が見つかりません。"),
         ]);
         continue;
       }
       const dateStr = format(reservation.date, "M月d日（EEEEE）", { locale: ja });
-      await lineClient.replyMessage(event.replyToken, [
+      await getLineClient().replyMessage(event.replyToken, [
         textMsg(
           `${dateStr} ${reservation.startTime}〜${reservation.endTime} の予約をキャンセルしますか？`,
           [
@@ -387,7 +387,7 @@ export async function POST(req: NextRequest) {
         data: { status: "CANCELLED" },
       });
       clearSession(userId);
-      await lineClient.replyMessage(event.replyToken, [
+      await getLineClient().replyMessage(event.replyToken, [
         textMsg("予約をキャンセルしました。", [
           { label: "予約する", text: "予約する" },
           { label: "メニューへ", text: "メニュー" },
@@ -404,7 +404,7 @@ export async function POST(req: NextRequest) {
         const d = addDays(today, i);
         return { label: dateLabel(d), text: format(d, "yyyy-MM-dd") };
       });
-      await lineClient.replyMessage(event.replyToken, [
+      await getLineClient().replyMessage(event.replyToken, [
         textMsg("新しい日付を選んでください。", quickReplies),
       ]);
       continue;
@@ -417,7 +417,7 @@ export async function POST(req: NextRequest) {
         date: text,
       });
       const times = makeTimeOptions("09:00", "19:30");
-      await lineClient.replyMessage(event.replyToken, [
+      await getLineClient().replyMessage(event.replyToken, [
         textMsg("新しい開始時間を選んでください。", times.map((t) => ({ label: t, text: t }))),
       ]);
       continue;
@@ -436,7 +436,7 @@ export async function POST(req: NextRequest) {
         const [th, tm] = t.split(":").map(Number);
         return th * 60 + tm > startMin;
       });
-      await lineClient.replyMessage(event.replyToken, [
+      await getLineClient().replyMessage(event.replyToken, [
         textMsg("新しい終了時間を選んでください。", times.map((t) => ({ label: t, text: t }))),
       ]);
       continue;
@@ -453,7 +453,7 @@ export async function POST(req: NextRequest) {
       });
       clearSession(userId);
       const dateStr = format(parseISO(session.date), "M月d日（EEEEE）", { locale: ja });
-      await lineClient.replyMessage(event.replyToken, [
+      await getLineClient().replyMessage(event.replyToken, [
         textMsg(
           `予約を変更しました！\n\n日付: ${dateStr}\n時間: ${session.startTime} 〜 ${text}`,
           [
@@ -476,7 +476,7 @@ export async function POST(req: NextRequest) {
         take: 5,
       });
       if (reservations.length === 0) {
-        await lineClient.replyMessage(event.replyToken, [
+        await getLineClient().replyMessage(event.replyToken, [
           textMsg("現在予約はありません。"),
         ]);
         continue;
@@ -484,13 +484,13 @@ export async function POST(req: NextRequest) {
       const messages: Message[] = reservations.map((r) =>
         reservationCard({ ...r, customer: customer! })
       );
-      await lineClient.replyMessage(event.replyToken, messages.slice(0, 5));
+      await getLineClient().replyMessage(event.replyToken, messages.slice(0, 5));
       continue;
     }
 
     if (text === "メニュー" || text === "ホーム") {
       clearSession(userId);
-      await lineClient.replyMessage(event.replyToken, [
+      await getLineClient().replyMessage(event.replyToken, [
         textMsg(
           `${customer!.name} さん、何をしますか？`,
           [
@@ -503,7 +503,7 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
-    await lineClient.replyMessage(event.replyToken, [
+    await getLineClient().replyMessage(event.replyToken, [
       textMsg(
         "ご用件をお選びください。",
         [
