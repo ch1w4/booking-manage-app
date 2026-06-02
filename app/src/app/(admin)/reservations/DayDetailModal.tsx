@@ -29,11 +29,9 @@ const TIME_OPTIONS = Array.from({ length: 25 }, (_, i) => {
 }).filter((t) => t <= "21:00");
 
 const TIME_ROWS: string[] = [];
-for (let h = 9; h <= 20; h++) {
+for (let h = 9; h <= 21; h++) {
   TIME_ROWS.push(`${String(h).padStart(2, "0")}:00`);
-  TIME_ROWS.push(`${String(h).padStart(2, "0")}:30`);
 }
-TIME_ROWS.push("21:00");
 
 function toMin(t: string) {
   const [h, m] = t.split(":").map(Number);
@@ -114,9 +112,16 @@ export default function DayDetailModal({
     for (const r of reservations) {
       if (seatMap.get(r.id) !== seat) continue;
       const rowMin = toMin(timeRow);
+      const rowEnd = rowMin + 60; // 1時間ブロック
       const s = toMin(r.startTime);
       const e = toMin(r.endTime);
-      if (rowMin >= s && rowMin < e) return { r, isFirst: rowMin === s };
+      // この1時間ブロックに予約が重なる場合
+      if (s < rowEnd && e > rowMin) {
+        // 前の行でも表示されていなければ isFirst = true
+        const prevRowMin = rowMin - 60;
+        const isFirst = prevRowMin < toMin(TIME_ROWS[0]) || !(s < rowMin && e > prevRowMin);
+        return { r, isFirst };
+      }
     }
     return null;
   }
@@ -314,8 +319,9 @@ function BoothTable({
   // 印刷時：各行を mm で指定（A4横 8mmマージン ≈ 281×194mm 利用可能）
   // タイトル 6mm → セクション1 (94mm - セクションヘッダー 8mm = 86mm / 25行 ≈ 3.44mm/行)
   // セクション2も同様
-  const printRowMm = 3.3;
-  const printSecHeaderMm = 7;
+  // 13行×2段: (194mm - 16mm余白 - 6mm タイトル - 8mm ヘッダー×2) / 26行 ≈ 6.3mm
+  const printRowMm = 6.0;
+  const printSecHeaderMm = 8;
   const printTitleMm = 6;
 
   const outerBorder = "3px solid #1f2937";
