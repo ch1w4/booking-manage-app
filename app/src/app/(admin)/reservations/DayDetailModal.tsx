@@ -86,7 +86,7 @@ export default function DayDetailModal({
   }, [date]);
 
   const seatMap = assignSeats(reservations);
-  const seatCount = reservations.length > 0 ? Math.max(...Array.from(seatMap.values())) + 1 : 0;
+  const seatCount = 11;
 
   // 特定時間帯に存在する予約を取得
   function getReservationAt(seat: number, timeRow: string): { r: Reservation; isFirst: boolean } | null {
@@ -376,9 +376,7 @@ function ScheduleTable({
                 if (!isFirst) {
                   return (
                     <>
-                      <td key={`${s}-mark`} className="border border-gray-300 px-1 py-1 text-center text-gray-400" style={{ backgroundColor: bg }}>
-                        ↓
-                      </td>
+                      <td key={`${s}-mark`} className="border border-gray-300 px-1 py-1" style={{ backgroundColor: bg }} />
                       <td key={`${s}-id`} className="border border-gray-300 px-1 py-1 text-center text-gray-400" style={{ backgroundColor: bg }}>
                         ↓
                       </td>
@@ -392,17 +390,9 @@ function ScheduleTable({
                   <>
                     <td
                       key={`${s}-mark`}
-                      className="border border-gray-300 px-1 py-1 text-center"
+                      className="border border-gray-300 px-1 py-1"
                       style={{ backgroundColor: bg }}
-                    >
-                      <span
-                        className="inline-block w-4 h-4 rounded-full text-white text-center leading-4"
-                        style={{ backgroundColor: r.customer.course.color, fontSize: "9px" }}
-                        title={r.customer.course.name}
-                      >
-                        {isFixed ? "固" : "fl"}
-                      </span>
-                    </td>
+                    />
                     <td
                       key={`${s}-id`}
                       className="border border-gray-300 px-1 py-1 font-mono font-medium"
