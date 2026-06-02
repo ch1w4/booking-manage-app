@@ -83,7 +83,7 @@ export default function CustomersClient({
           setShowForm(false);
         } else {
           const d = await res.json();
-          setError(d.error ?? "エラーが発生しました");
+          setError(typeof d.error === "string" ? d.error : "入力内容を確認してください");
         }
       }
     } finally {

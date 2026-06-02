@@ -5,7 +5,6 @@ import { z } from "zod";
 const customerSchema = z.object({
   customerCode: z.string().regex(/^\d{4}$/),
   name: z.string().min(1),
-  courseId: z.number().int().positive(),
   lineUserId: z.string().optional().nullable(),
 });
 
